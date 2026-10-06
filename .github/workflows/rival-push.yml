@@ -1,0 +1,35 @@
+name: Send push to Rival
+
+on: push
+
+jobs:
+  notify-rival:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build, sign and send payload
+        env:
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          AUTHOR: ${{ github.actor }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+          RIVAL_WEBHOOK_URL: ${{ secrets.RIVAL_WEBHOOK_URL }}
+          RIVAL_SIGNING_SECRET: ${{ secrets.RIVAL_SIGNING_SECRET }}
+        run: |
+          # 1. Build the JSON body
+          jq -n \
+            --arg repo "$REPO" \
+            --arg branch "$BRANCH" \
+            --arg commit "$COMMIT" \
+            --arg author "$AUTHOR" \
+            --arg message "$MESSAGE" \
+            '{repo: $repo, branch: $branch, commit: $commit, author: $author, message: $message}' > payload.json
+
+          # 2. Hex HMAC-SHA256 of the exact body bytes
+          SIG=$(openssl dgst -sha256 -hmac "$RIVAL_SIGNING_SECRET" -hex < payload.json | sed 's/^.*= //')
+
+          # 3. Send the exact same bytes with the signature
+          curl -sS --fail-with-body -X POST "$RIVAL_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-Rival-Signature: $SIG" \
+            --data-binary @payload.json
